@@ -1,53 +1,45 @@
-import { useEffect, useState } from 'react';
-import api from './api';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import LabPage from './pages/LabPage';
+import GlitchText from './components/GlitchText';
 
-function App() {
-  const [status, setStatus] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    // Test the connection to the backend
-    api.get('/')
-      .then((response) => {
-        setStatus(response.data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("System Failure:", error);
-        setStatus({ status: "offline", system: "Connection Refused" });
-        setLoading(false);
-      });
-  }, []);
-
-  return (
-    <div className="flex h-screen w-screen items-center justify-center bg-gray-950 text-green-500">
-      <div className="border border-green-500 p-8 shadow-[0_0_20px_rgba(0,255,65,0.3)] bg-black max-w-md w-full">
-        <h1 className="text-2xl font-bold tracking-widest mb-4 uppercase border-b border-green-800 pb-2">
-          LogicLock System
-        </h1>
+const Home = () => (
+  <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-green-400 font-mono p-4">
+    <div className="max-w-2xl w-full text-center space-y-8">
+      <div className="border border-green-500/30 p-10 bg-black/40 backdrop-blur relative overflow-hidden group">
+        <div className="absolute inset-0 bg-[url('https://media.giphy.com/media/U3qYN8S0j3bpK/giphy.gif')] opacity-5 bg-cover mix-blend-overlay pointer-events-none"></div>
         
-        {loading ? (
-          <div className="animate-pulse">INITIALIZING UPLINK...</div>
-        ) : (
-          <div className="space-y-2 font-mono">
-            <div className="flex justify-between">
-              <span>STATUS:</span>
-              <span className={status.status === 'online' ? "text-green-400" : "text-red-500"}>
-                [{status.status?.toUpperCase()}]
-              </span>
+        <GlitchText text="LOGICLOCK" className="text-6xl font-bold mb-2 tracking-tighter" />
+        <p className="text-xl text-gray-400 mb-8">CYBER SECURITY BATTLEGROUNDS</p>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link to="/lab/SQL-101" className="block group/btn relative">
+            <div className="absolute inset-0 bg-neon-green opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
+            <div className="border border-green-500/50 p-4 hover:border-green-400 transition-colors">
+              {/* FIXED: Wrapped arrows in braces */}
+              <h3 className="font-bold text-lg">{'>>'} START TRAINING</h3>
+              <p className="text-xs text-gray-500 mt-2">Initialize Sandbox Environment</p>
             </div>
-            <div className="flex justify-between">
-              <span>CORE:</span>
-              <span>{status.system}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>VERSION:</span>
-              <span>{status.version || 'UNKNOWN'}</span>
-            </div>
+          </Link>
+          
+          <div className="border border-gray-700 p-4 opacity-50 cursor-not-allowed">
+             {/* FIXED: Wrapped arrows in braces */}
+             <h3 className="font-bold text-lg">{'>>'} MULTIPLAYER ARENA</h3>
+             <p className="text-xs text-gray-500 mt-2">LOCKED (Level 5 Required)</p>
           </div>
-        )}
+        </div>
       </div>
     </div>
+  </div>
+);
+
+function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/lab/:id" element={<LabPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
