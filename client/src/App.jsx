@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import LabPage from './pages/LabPage';
 import GlitchText from './components/GlitchText';
 import ChainBuilder from './components/ChainBuilder';
+import ArenaLobby from './pages/ArenaLobby';
+import ArenaGame from './pages/ArenaGame';
 
 const Home = () => (
   <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center text-green-400 font-mono p-4">
@@ -31,6 +33,13 @@ const Home = () => (
              <p className="text-xs text-gray-500 mt-2">Design Attack Workflows (BETA)</p>
           </Link>
 
+          {/* <Link to="/arena" className="..."> */}
+  {/* Unlock the Multiplayer Card */}
+            <Link to="/arena" className="block group/btn relative border border-gray-700 p-4 hover:border-alert-red transition-colors">
+             <div className="absolute inset-0 bg-alert-red opacity-0 group-hover/btn:opacity-10 transition-opacity"></div>
+             <h3 className="font-bold text-lg text-gray-300 group-hover/btn:text-alert-red">{'>>'} Multiplayer</h3>
+             <p className="text-xs text-gray-500 mt-2">Arena</p>
+          </Link>
         </div>
       </div>
     </div>
@@ -43,6 +52,9 @@ function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         
+        <Route path="/arena" element={<ArenaLobby />} />
+        <Route path="/arena/:matchId/:role" element={<ArenaGame />} />
+
         <Route path="/lab/:id" element={<LabPage />} />
         
         <Route path="/builder" element={

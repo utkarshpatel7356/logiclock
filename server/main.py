@@ -13,6 +13,7 @@ import select
 import struct
 import fcntl
 import termios
+import arena_manager
 
 import docker_manager
 
@@ -227,6 +228,28 @@ async def websocket_shell(websocket: WebSocket, container_id: str):
         if 'process' in locals() and process.poll() is None:
             process.terminate()
             process.wait()
+
+class MatchRequest(BaseModel):
+    match_id: str
+    role: str # 'red' or 'blue'
+
+@app.post("/arena/create")
+async def create_arena():
+    return arena_manager.create_match()
+
+@app.post("/arena/join")
+async def join_arena(req: MatchRequest):
+    try:
+        return arena_manager.join_match(req.match_id, req.role)
+    except Exception as e:
+        raise HTTPException(404, detail=str(e))
+
+@app.get("/arena/score/{match_id}")
+async def get_score(match_id: str):
+    score = arena_manager.check_score(match_id)
+    if not score:
+        raise HTTPException(404, detail="Match ended")
+    return score
 
 # --- ENTRY POINT ---
 if __name__ == "__main__":
