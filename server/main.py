@@ -246,10 +246,18 @@ async def join_arena(req: MatchRequest):
 
 @app.get("/arena/score/{match_id}")
 async def get_score(match_id: str):
-    score = arena_manager.check_score(match_id)
-    if not score:
-        raise HTTPException(404, detail="Match ended")
-    return score
+    # CRITICAL FIX: Run the blocking Docker command in a separate thread
+    # This prevents the main server loop from freezing while waiting for Redis
+    try:
+        score = await asyncio.to_thread(arena_manager.check_score, match_id)
+        if not score:
+            raise HTTPException(404, detail="Match ended")
+        return score
+    except Exception as e:
+        # Fallback if asyncio.to_thread isn't available (Python < 3.9) use:
+        # loop = asyncio.get_running_loop()
+        # score = await loop.run_in_executor(None, arena_manager.check_score, match_id)
+        raise HTTPException(500, detail=str(e))
 
 # --- ENTRY POINT ---
 if __name__ == "__main__":

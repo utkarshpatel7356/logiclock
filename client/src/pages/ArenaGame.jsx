@@ -35,7 +35,7 @@ const ArenaGame = () => {
             king: res.data.current_king 
         });
       } catch (e) {}
-    }, 1000);
+    }, 3000);
     return () => clearInterval(interval);
   }, [matchId]);
 
