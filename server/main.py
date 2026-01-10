@@ -13,9 +13,9 @@ import select
 import struct
 import fcntl
 import termios
-import arena_manager
 
 import docker_manager
+import arena_manager
 
 load_dotenv()
 
@@ -28,19 +28,28 @@ async def zombie_reaper():
     print("💀 REAPER: Online and watching...")
     while True:
         await asyncio.sleep(10)
-        now = time.time()
-        to_kill = [cid for cid, last_seen in active_labs.items() if now - last_seen > 15]
-        
-        for cid in to_kill:
-            print(f"💀 REAPER: Lab {cid} timed out. Killing...")
-            docker_manager.stop_lab(cid)
-            del active_labs[cid]
+        try:
+            now = time.time()
+            to_kill = [cid for cid, last_seen in active_labs.items() if now - last_seen > 15]
+            
+            for cid in to_kill:
+                print(f"💀 REAPER: Lab {cid} timed out. Killing...")
+                # CRITICAL FIX: Run stop_lab in a separate thread so it doesn't freeze the server
+                await asyncio.to_thread(docker_manager.stop_lab, cid)
+                
+                # Safely remove from dict
+                if cid in active_labs:
+                    del active_labs[cid]
+        except Exception as e:
+            print(f"REAPER ERROR: {e}")
 
 # --- LIFESPAN HANDLER ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("---------- SYSTEM STARTUP ----------")
-    docker_manager.cleanup_orphans()
+    # Clean orphans in a thread to avoid startup hang
+    await asyncio.to_thread(docker_manager.cleanup_orphans)
+    
     task = asyncio.create_task(zombie_reaper())
     yield
     print("---------- SYSTEM SHUTDOWN ----------")
@@ -49,7 +58,7 @@ async def lifespan(app: FastAPI):
 # Initialize App
 app = FastAPI(title="LogicLock Core", lifespan=lifespan)
 
-# CORS (Allow All for Development)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,6 +74,10 @@ class LabRequest(BaseModel):
 class HeartbeatRequest(BaseModel):
     container_id: str
 
+class MatchRequest(BaseModel):
+    match_id: str
+    role: str
+
 class GraphPayload(BaseModel):
     nodes: List[Dict[str, Any]]
     edges: List[Dict[str, Any]]
@@ -78,7 +91,8 @@ async def health():
 @app.post("/lab/start")
 async def start_lab(req: LabRequest):
     try:
-        result = docker_manager.start_lab(req.image)
+        # THREAD FIX: Start lab in background thread
+        result = await asyncio.to_thread(docker_manager.start_lab, req.image)
         active_labs[result["container_id"]] = time.time()
         print(f"⭐ NEW LAB: {result['container_id']}")
         return result
@@ -94,10 +108,37 @@ async def heartbeat(req: HeartbeatRequest):
 
 @app.post("/lab/stop")
 async def stop_lab(req: HeartbeatRequest):
-    docker_manager.stop_lab(req.container_id)
+    # THREAD FIX: Stop lab in background thread
+    await asyncio.to_thread(docker_manager.stop_lab, req.container_id)
     if req.container_id in active_labs:
         del active_labs[req.container_id]
     return {"status": "stopped"}
+
+# --- ARENA ROUTES ---
+
+@app.post("/arena/create")
+async def create_arena():
+    # THREAD FIX
+    return await asyncio.to_thread(arena_manager.create_match)
+
+@app.post("/arena/join")
+async def join_arena(req: MatchRequest):
+    try:
+        # THREAD FIX
+        return await asyncio.to_thread(arena_manager.join_match, req.match_id, req.role)
+    except Exception as e:
+        raise HTTPException(404, detail=str(e))
+
+@app.get("/arena/score/{match_id}")
+async def get_score(match_id: str):
+    try:
+        # THREAD FIX: Check score in background
+        score = await asyncio.to_thread(arena_manager.check_score, match_id)
+        if not score:
+            raise HTTPException(404, detail="Match ended")
+        return score
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
 
 @app.post("/api/generate-script")
 async def generate_script(payload: GraphPayload):
@@ -168,17 +209,18 @@ async def generate_script(payload: GraphPayload):
         "script": compiled_script
     }
 
-# --- WEBSOCKET ENDPOINT (REAL SHELL) ---
+# --- WEBSOCKET ENDPOINT (NON-BLOCKING) ---
 @app.websocket("/ws/shell/{container_id}")
 async def websocket_shell(websocket: WebSocket, container_id: str):
     await websocket.accept()
     print(f"🔌 WS CONNECTION: Client connected to {container_id}")
     
+    master_fd = None
+    process = None
+    
     try:
-        # Create a Pseudo-Terminal (PTY)
         master_fd, slave_fd = pty.openpty()
 
-        # Spawn the Docker Shell process connected to the PTY
         process = subprocess.Popen(
             ['docker', 'exec', '-it', container_id, '/bin/sh'],
             stdin=slave_fd,
@@ -186,37 +228,37 @@ async def websocket_shell(websocket: WebSocket, container_id: str):
             stderr=slave_fd,
             preexec_fn=os.setsid
         )
-
         os.close(slave_fd)
 
-        # The Loop: Pipe Data between WebSocket and PTY
         loop = asyncio.get_running_loop()
+        output_queue = asyncio.Queue()
 
-        async def pty_reader():
+        def on_pty_data():
+            try:
+                data = os.read(master_fd, 1024)
+                if data: output_queue.put_nowait(data)
+                else: output_queue.put_nowait(None)
+            except OSError: output_queue.put_nowait(None)
+
+        loop.add_reader(master_fd, on_pty_data)
+
+        async def sender():
             while True:
-                try:
-                    data = await loop.run_in_executor(None, lambda: os.read(master_fd, 1024))
-                    if not data: break
-                    await websocket.send_text(data.decode('utf-8', errors='ignore'))
-                except OSError:
-                    break
+                data = await output_queue.get()
+                if data is None: break
+                await websocket.send_text(data.decode('utf-8', errors='ignore'))
 
-        async def ws_reader():
+        async def receiver():
             while True:
                 try:
                     data = await websocket.receive_text()
                     os.write(master_fd, data.encode())
-                except WebSocketDisconnect:
-                    break
-
-        reader_task = asyncio.create_task(pty_reader())
-        writer_task = asyncio.create_task(ws_reader())
-
+                except WebSocketDisconnect: break
+        
         done, pending = await asyncio.wait(
-            [reader_task, writer_task],
+            [asyncio.create_task(sender()), asyncio.create_task(receiver())],
             return_when=asyncio.FIRST_COMPLETED
         )
-
         for task in pending: task.cancel()
 
     except Exception as e:
@@ -224,42 +266,13 @@ async def websocket_shell(websocket: WebSocket, container_id: str):
 
     finally:
         print(f"🔌 WS DISCONNECT: Client left {container_id}")
-        if 'master_fd' in locals(): os.close(master_fd)
-        if 'process' in locals() and process.poll() is None:
+        if master_fd:
+            loop.remove_reader(master_fd)
+            os.close(master_fd)
+        if process and process.poll() is None:
             process.terminate()
             process.wait()
 
-class MatchRequest(BaseModel):
-    match_id: str
-    role: str # 'red' or 'blue'
-
-@app.post("/arena/create")
-async def create_arena():
-    return arena_manager.create_match()
-
-@app.post("/arena/join")
-async def join_arena(req: MatchRequest):
-    try:
-        return arena_manager.join_match(req.match_id, req.role)
-    except Exception as e:
-        raise HTTPException(404, detail=str(e))
-
-@app.get("/arena/score/{match_id}")
-async def get_score(match_id: str):
-    # CRITICAL FIX: Run the blocking Docker command in a separate thread
-    # This prevents the main server loop from freezing while waiting for Redis
-    try:
-        score = await asyncio.to_thread(arena_manager.check_score, match_id)
-        if not score:
-            raise HTTPException(404, detail="Match ended")
-        return score
-    except Exception as e:
-        # Fallback if asyncio.to_thread isn't available (Python < 3.9) use:
-        # loop = asyncio.get_running_loop()
-        # score = await loop.run_in_executor(None, arena_manager.check_score, match_id)
-        raise HTTPException(500, detail=str(e))
-
-# --- ENTRY POINT ---
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))
