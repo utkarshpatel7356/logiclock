@@ -39,6 +39,21 @@ const ArenaGame = () => {
     return () => clearInterval(interval);
   }, [matchId]);
 
+  // 3. HEARTBEAT LOOP (Keep container alive)
+  useEffect(() => {
+    if (!containerId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        await api.post('/lab/heartbeat', { container_id: containerId });
+      } catch (e) {
+        console.error("Heartbeat failed", e);
+      }
+    }, 5000); // Send signal every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [containerId]);
+  
   return (
     <div className="h-screen w-screen bg-gray-900 p-4 flex flex-col gap-4 font-mono overflow-hidden">
       

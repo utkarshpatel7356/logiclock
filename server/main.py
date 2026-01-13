@@ -124,8 +124,14 @@ async def create_arena():
 @app.post("/arena/join")
 async def join_arena(req: MatchRequest):
     try:
-        # THREAD FIX
-        return await asyncio.to_thread(arena_manager.join_match, req.match_id, req.role)
+        # 1. Spin up the container (Background thread)
+        result = await asyncio.to_thread(arena_manager.join_match, req.match_id, req.role)
+        
+        # 2. CRITICAL FIX: Register this container with the Reaper!
+        # Now the system will track if this user is still online.
+        active_labs[result["container_id"]] = time.time()
+        
+        return result
     except Exception as e:
         raise HTTPException(404, detail=str(e))
 
