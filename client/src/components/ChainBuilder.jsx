@@ -136,7 +136,7 @@ const ChainBuilder = () => {
             
             {/* Modal Header */}
             <div className="bg-gray-800 p-3 border-b border-gray-700 flex justify-between items-center">
-              <span className="text-neon-green font-mono font-bold">>> GENERATED_PAYLOAD.sh</span>
+              <span className="text-neon-green font-mono font-bold">{'>>'} GENERATED_PAYLOAD.sh</span>
               <button onClick={() => setShowModal(false)} className="text-gray-400 hover:text-white">
                 [X] CLOSE
               </button>
